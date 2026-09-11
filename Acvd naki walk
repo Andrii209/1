@@ -1,0 +1,651 @@
+@name ACVD Mech Base by Naki + Walk Mode
+@inputs ZMIn ZMOut [CamAng]:angle CamAimPos:vector [Seat Base Pelvis LHip RHip LThigh RThigh LFoot RFoot]:entity
+@inputs [Gun_Right Gun_Left Gun_Right_Ent Gun_Left_Ent]:entity
+@inputs [Shoulder_Base_1 Shoulder_Base_2 Shoulder_Base_3 Shoulder_Base_4]:entity
+@outputs [RHeight LHeight]:vector Booster
+@outputs ReloadExtra1 FireExtra1 Cam_Hold:angle ZMState CamFOV CamFilter:array Active CamDist TP [CamPos LFoot_Pos RFoot_Pos TargetPos]:vector FireLeft FireRight BoostPowerVal FX
+@outputs ShoulderMode FireShoulder FireShoulder1 FireShoulder2 FireShoulder3 FireShoulder4 FireShoulderLeft FireShoulderRight
+@persist XAng ZAng ThirdPerson ZMState CamDist BaseFOV FOV:array CamFOV CamFilter:array
+@persist [Offset FP_CamPos TP_CamPos RSave LSave CamPos LHeight RHeight RangerHull ZAxis GroundVelScale BoostDir]:vector Length_A Length_B Leg_Width Leg_Stand_Width Leg_Forward_Offset Height Mass Move_Speed On_Ground TP_CamDist TP [Cam_Hold]:angle
+@persist Edit Debug WalkOverWrite BoostPowerVal CanBoost AimRight AimLeft GunsStowed
+@persist Move_Speed_Min Move_Accel Move_Decel CurrentMoveSpeed Move_Damping Coast_Damping
+@persist RangerDist StandHeight Length_A2 Length_B2 Length_AB Length_BA2
+@persist ShoulderMode ShoulderHoloReady1 ShoulderHoloReady2 ShoulderHoloReady3 ShoulderHoloReady4 Shoulder_Aim_Speed
+@persist ShoulderDeploy ShoulderDeployTime ShoulderDeployDelay ShoulderStowUntil Shoulder_Stow_Time Shoulder_Stow_Speed
+@persist ShoulderSide1 ShoulderSide2 ShoulderSide3 ShoulderSide4
+@persist Shoulder_Stow_Pitch Shoulder_Stow_Yaw Shoulder_Stow_Roll
+@persist Shoulder_Aim_Pitch_Offset Shoulder_Aim_Yaw_Offset Shoulder_Aim_Roll_Offset
+@persist WalkMode Step CycleTime StepTime IsMoving StepHeight StepLength WalkTransition
+@persist FootGroundOffset StepSoundPitch StepSoundVolume WalkSpeed SoundCycleTime SoundStepDuration
+#@trigger none
+
+if(first()|dupefinished()){
+    Edit=0
+    Offset=vec(0,0,-25)
+    Height=105
+    
+    Move_Speed=180
+    Move_Speed_Min=100
+    Move_Accel=20
+    Move_Decel=10
+    Move_Damping=0.2
+    Coast_Damping=0.05
+    CurrentMoveSpeed=0
+    
+    Leg_Width=45
+    Leg_Stand_Width=70
+    Leg_Forward_Offset=0
+    Length_A=45.57
+    Length_B=76.31
+    FP_CamPos=vec(-15,0,90)
+    TP_CamPos=vec(-35,0,125)
+    TP_CamDist=420
+    BaseFOV=110
+    FOV[1,number]=0
+    FOV[2,number]=BaseFOV*0.6
+    FOV[3,number]=BaseFOV*0.2
+    BoostPowerVal=0
+    TP=0
+    CamDist=0
+    
+    ZAxis=vec(0,0,1)
+    GroundVelScale=vec(0.5,0.5,0.25)
+    RangerHull=vec(Leg_Width/2,Leg_Width/2,0)
+    RangerDist=(Height+4)*1.5
+    StandHeight=(Height+4)*1.1
+    Length_A2=Length_A*Length_A
+    Length_B2=Length_B*Length_B
+    Length_AB=Length_A+Length_B
+    Length_BA2=2*Length_A*Length_B
+    
+    WalkMode = 0
+    Step = 0
+    CycleTime = systime()
+    StepTime = 0
+    IsMoving = 0
+    StepHeight = 25      
+    StepLength = 35      
+    WalkTransition = 1.0 
+    FootGroundOffset = 10    
+    StepSoundPitch = 100     
+    StepSoundVolume = 0.8    
+    WalkSpeed = 130          
+    SoundCycleTime = systime()
+    SoundStepDuration = 0.4  #   (  )
+
+    ShoulderMode=0
+    ShoulderHoloReady1=0
+    ShoulderHoloReady2=0
+    ShoulderHoloReady3=0
+    ShoulderHoloReady4=0
+    ShoulderDeploy=0
+    ShoulderDeployTime=0
+    ShoulderDeployDelay=0.25
+    ShoulderStowUntil=0
+    Shoulder_Stow_Time=0.6
+    Shoulder_Stow_Speed=35
+    Shoulder_Aim_Speed=100
+    Shoulder_Stow_Pitch=-90
+    Shoulder_Stow_Yaw=0
+    Shoulder_Stow_Roll=0
+    Shoulder_Aim_Pitch_Offset=0
+    Shoulder_Aim_Yaw_Offset=0
+    Shoulder_Aim_Roll_Offset=0
+    ShoulderSide1=1
+    ShoulderSide2=2
+    ShoulderSide3=1
+    ShoulderSide4=2
+    GunsStowed=1
+    Debug=0
+    WalkOverWrite=0
+    CanBoost=1
+    Leg_Stand_Width=Edit ? Leg_Width : Leg_Stand_Width
+    LHeight=vec(Leg_Forward_Offset,Leg_Stand_Width,-Height)
+    RHeight=vec(Leg_Forward_Offset,-Leg_Stand_Width,-Height)
+
+    function angle shoulderStowAng() {
+        return Base:toWorld(ang(Shoulder_Stow_Pitch, Shoulder_Stow_Yaw, Shoulder_Stow_Roll))
+    }
+
+    function number setupShoulder(Index, ShoulderBase:entity) {
+        if(!ShoulderBase | !Base) { return 0 }
+        holoCreate(Index,ShoulderBase:toWorld(vec(0,0,0)),vec(0),ShoulderBase:toWorld(ang(0,0,0)),vec(255),"cube")
+        local ShoulderChildren = ShoulderBase:children()
+        rangerFilter(ShoulderChildren)
+        CamFilter:pushEntity(ShoulderBase)
+        CamFilter:pushEntity(holoEntity(Index))
+        foreach(I,E:entity=ShoulderChildren){ CamFilter:pushEntity(E) }
+        local ShoulderLocalPos = Base:toLocal(ShoulderBase:pos())
+        local Y = ShoulderLocalPos:y()
+        local Side = 2
+        if(abs(Y) < 1) {
+            if((Index % 2) == 1) { Side = 1 } else { Side = 2 }
+        } elseif(Y >= 0) {
+            Side = 1
+        }
+        if(Index == 13) { ShoulderSide1 = Side }
+        elseif(Index == 14) { ShoulderSide2 = Side }
+        elseif(Index == 15) { ShoulderSide3 = Side }
+        elseif(Index == 16) { ShoulderSide4 = Side }
+        ShoulderBase:parentTo(holoEntity(Index))
+        holoParent(Index,Base)
+        holoPos(Index,Base:toWorld(ShoulderLocalPos))
+        holoAng(Index,shoulderStowAng())
+        holoEntity(Index):propFreeze(1)
+        ShoulderBase:propFreeze(1)
+        for(I=1,ShoulderChildren:count()){ ShoulderChildren[I,entity]:parentTo(ShoulderBase) }
+        return 1
+    }
+
+    function stowShoulders() {
+        if(Base) {
+            local StowAng = shoulderStowAng()
+            if(ShoulderHoloReady1) { holoAng(13,StowAng) }
+            if(ShoulderHoloReady2) { holoAng(14,StowAng) }
+            if(ShoulderHoloReady3) { holoAng(15,StowAng) }
+            if(ShoulderHoloReady4) { holoAng(16,StowAng) }
+        }
+    }
+
+    function two_seg_ik(NHipA, NHipB, NKnee, Pelvis:entity, Target:vector) {
+        local HipA = holoEntity(NHipA)
+        local AxisLocal = Pelvis:toLocalAxis(Target - HipA:pos())
+        holoAng(NHipA, Pelvis:toWorld(ang(0, 0, atan(AxisLocal:z(), AxisLocal:y()) + 90)))
+        local HipB = holoEntity(NHipB)
+        local ToTarget = Target - HipB:pos()
+        local AxisLocal2 = HipA:toLocalAxis(ToTarget)
+        local Distance = AxisLocal2:length()
+        if(Distance > Length_AB) { Distance = Length_AB }
+        elseif(Distance < 1) { Distance = 1 }
+        local D2 = Distance*Distance
+        local HipArg = (D2 + Length_A2 - Length_B2) / (2*Distance*Length_A)
+        local KneeArg = (Length_B2 + Length_A2 - D2) / Length_BA2
+        HipArg = clamp(HipArg,-1,1)
+        KneeArg = clamp(KneeArg,-1,1)
+        holoAng(NHipB, HipA:toWorld(ang(atan(-AxisLocal2:x(), AxisLocal2:z()) + acos(HipArg), 180, 0)))
+        holoAng(NKnee, HipB:toWorld(ang(acos(KneeArg) + 180, 0, 0)))
+    }
+
+    runOnPlayerConnect(1)
+    Mass=Base:mass()
+    rangerPersist(1)
+    rangerFilter(Base:getConnectedEntities())
+    rangerHitWater(0)
+    CamFilter:pushEntity(Gun_Right_Ent)
+    CamFilter:pushEntity(Gun_Left_Ent)
+    foreach(I,E:entity=Base:getConstraints()){ CamFilter:pushEntity(E) }
+    foreach(I,E:entity=Base:children()){ CamFilter:pushEntity(E) }
+    rangerFilter(players())
+    CamPos=FP_CamPos
+    Base:propInertia(vec(3500,3500,3500))
+
+    holoCreate(1,Pelvis:toWorld(vec(0,0,0)),vec(0),Pelvis:toWorld(ang(0,0,0)),vec(255),"cube")
+    local Children=Pelvis:children()
+    rangerFilter(Children)
+    Pelvis:parentTo(holoEntity(1))
+    holoPos(1,Base:toWorld(Offset))
+    holoAng(1,Base:toWorld(ang(0,0,0)))
+    holoParent(1,Base)
+    for(I=1,Children:count()){ Children[I,entity]:parentTo(Pelvis) }
+
+    holoCreate(2,holoEntity(1):toWorld(vec(0,Leg_Width,0)),vec(0),holoEntity(1):toWorld(ang(0,0,0)),vec(255),"cube")
+    holoParent(2,1)
+    holoCreate(3,LHip:toWorld(vec(0,0,0)),vec(0),LHip:toWorld(ang(0,0,0)),vec(255),"cube")
+    local Children=LHip:children()
+    rangerFilter(Children)
+    LHip:parentTo(holoEntity(3))
+    holoPos(3,holoEntity(2):toWorld(vec(0,0,0)))
+    holoAng(3,holoEntity(2):toWorld(ang(0,0,0)))
+    holoParent(3,2)
+    for(I=1,Children:count()){ Children[I,entity]:parentTo(LHip) }
+
+    holoCreate(4,LThigh:toWorld(vec(0,0,0)),vec(0),LThigh:toWorld(ang(0,0,0)),vec(255),"cube")
+    local Children=LThigh:children()
+    rangerFilter(Children)
+    LThigh:parentTo(holoEntity(4))
+    holoPos(4,holoEntity(3):toWorld(vec(0,0,Length_A)))
+    holoAng(4,holoEntity(3):toWorld(ang(0,0,0)))
+    holoParent(4,3)
+    for(I=1,Children:count()){ Children[I,entity]:parentTo(LThigh) }
+
+    holoCreate(5,LFoot:toWorld(vec(0,0,0)),vec(0),LFoot:toWorld(ang(0,0,0)),vec(255),"cube")
+    local Children=LFoot:children()
+    rangerFilter(Children)
+    LFoot:parentTo(holoEntity(5))
+    holoPos(5,holoEntity(4):toWorld(vec(0,0,Length_B)))
+    holoAng(5,holoEntity(4):toWorld(ang(0,0,0)))
+    holoParent(5,4)
+    for(I=1,Children:count()){ Children[I,entity]:parentTo(LFoot) }
+
+    holoCreate(7,holoEntity(1):toWorld(vec(0,-Leg_Width,0)),vec(0),holoEntity(1):toWorld(ang(0,0,0)),vec(255),"cube")
+    holoParent(7,1)
+    holoCreate(8,RHip:toWorld(vec(0,0,0)),vec(0),RHip:toWorld(ang(0,0,0)),vec(255),"cube")
+    local Children=RHip:children()
+    rangerFilter(Children)
+    RHip:parentTo(holoEntity(8))
+    holoPos(8,holoEntity(7):toWorld(vec(0,0,0)))
+    holoAng(8,holoEntity(7):toWorld(ang(0,0,0)))
+    holoParent(8,7)
+    for(I=1,Children:count()){ Children[I,entity]:parentTo(RHip) }
+
+    holoCreate(9,RThigh:toWorld(vec(0,0,0)),vec(0),RThigh:toWorld(ang(0,0,0)),vec(255),"cube")
+    local Children=RThigh:children()
+    rangerFilter(Children)
+    RThigh:parentTo(holoEntity(9))
+    holoPos(9,holoEntity(8):toWorld(vec(0,0,Length_A)))
+    holoAng(9,holoEntity(8):toWorld(ang(0,0,0)))
+    holoParent(9,8)
+    for(I=1,Children:count()){ Children[I,entity]:parentTo(RThigh) }
+
+    holoCreate(10,RFoot:toWorld(vec(0,0,0)),vec(0),RFoot:toWorld(ang(0,0,0)),vec(255),"cube")
+    local Children=RFoot:children()
+    rangerFilter(Children)
+    RFoot:parentTo(holoEntity(10))
+    holoPos(10,holoEntity(9):toWorld(vec(0,0,Length_B)))
+    holoAng(10,holoEntity(9):toWorld(ang(0,0,0)))
+    holoParent(10,9)
+    for(I=1,Children:count()){ Children[I,entity]:parentTo(RFoot) }
+
+    holoCreate(11,Gun_Right:toWorld(vec(0,0,0)),vec(0),Gun_Right:toWorld(ang(0,0,0)),vec(255),"cube")
+    local Children=Gun_Right:children()
+    rangerFilter(Children)
+    Gun_Right:parentTo(holoEntity(11))
+    holoPos(11,Base:toWorld(vec(-5,-50,60)))
+    holoAng(11,Base:toWorld(ang(35,-25,-25)))
+    holoParent(11,Base)
+    holoEntity(11):propFreeze(1)
+    for(I=1,Children:count()){ Children[I,entity]:parentTo(Gun_Right) }
+
+    holoCreate(12,Gun_Left:toWorld(vec(0,0,0)),vec(0),Gun_Left:toWorld(ang(0,0,0)),vec(255),"cube")
+    local Children=Gun_Left:children()
+    rangerFilter(Children)
+    Gun_Left:parentTo(holoEntity(12))
+    holoPos(12,Base:toWorld(vec(-5,50,60)))
+    holoAng(12,Base:toWorld(ang(35,25,25)))
+    holoParent(12,Base)
+    holoEntity(12):propFreeze(1)
+    for(I=1,Children:count()){ Children[I,entity]:parentTo(Gun_Left) }
+
+    Cam_Hold=Base:angles()
+    Base:soundPlay(9,0,"ambient/machines/spin_loop.wav")
+    soundPitch(9,30)
+    soundVolume(9,0.3)
+    timer("update",50)
+
+}elseif(playerConnectClk()){
+    rangerFilter(players())
+
+}elseif(clk("update")){
+    timer("update",50)
+    local Curtime = curtime()
+    W = Seat:driver():keyForward()+(WalkOverWrite*Debug)
+    A = Seat:driver():keyLeft()
+    S = Seat:driver():keyBack()
+    D = Seat:driver():keyRight()
+    Shift = Seat:driver():keySprint()
+    Space = Seat:driver():keyJump()
+    Duck = Seat:driver():keyDuck()
+    Alt = Seat:driver():keyWalk()
+    Mouse1 = Seat:driver():keyAttack1()
+    Mouse2 = Seat:driver():keyAttack2()
+    XKey = Seat:driver():keyPressed("x") | Seat:driver():keyPressed("X")
+    VKey = Seat:driver():keyPressed("v") | Seat:driver():keyPressed("V")
+    
+    AllPartsOK=Base&Pelvis&Seat&RHip&LHip&LFoot&RFoot&LThigh&RThigh
+    Active = (Seat:driver():isPlayer()+(Debug))*AllPartsOK
+    
+    local ShoulderAnyReady = ShoulderHoloReady1 | ShoulderHoloReady2 | ShoulderHoloReady3 | ShoulderHoloReady4
+    
+    local BasePos = Base:pos()
+    local BaseAngles = Base:angles()
+    local BaseYaw = BaseAngles:yaw()
+    local BasePitch = BaseAngles:pitch()
+    local BaseRoll = BaseAngles:roll()
+    local CamPitch = CamAng:pitch()
+    local CamYaw = CamAng:yaw()
+    local Vel = Base:vel()
+    local VelL = Base:velL()
+    local Pelvis = holoEntity(1)
+
+    if(!Active | !ShoulderAnyReady){
+        if(ShoulderMode | (ShoulderStowUntil > 0)){ stowShoulders() }
+        if(Base & !ShoulderMode & !GunsStowed){
+            holoAng(11,Base:toWorld(ang(35,-25,-25)))
+            holoAng(12,Base:toWorld(ang(35,25,25)))
+            GunsStowed=1
+        }
+        ShoulderMode=0
+        ShoulderDeploy=0
+        ShoulderStowUntil=0
+    }
+    
+    if(changed(XKey)&XKey&Active&ShoulderAnyReady){
+        ShoulderMode=!ShoulderMode
+        if(ShoulderMode){
+            AimLeft=0
+            AimRight=0
+            ShoulderDeploy=1
+            ShoulderDeployTime=Curtime+ShoulderDeployDelay
+            ShoulderStowUntil=0
+            GunsStowed=1
+            holoAng(11,Base:toWorld(ang(35,-25,-25)))
+            holoAng(12,Base:toWorld(ang(35,25,25)))
+        }else{
+            ShoulderDeploy=0
+            ShoulderStowUntil=Curtime+Shoulder_Stow_Time
+        }
+    }
+    
+    if(ShoulderMode & ShoulderDeploy & Curtime >= ShoulderDeployTime){ ShoulderDeploy=0 }
+    
+    if(changed(VKey) & VKey & Active){
+        WalkMode = !WalkMode
+        if(WalkMode){
+            WalkTransition = 1.0
+            CycleTime = systime()
+            Step = 0
+            SoundCycleTime = systime()
+            Base:propSetVelocityInstant(vec())
+            Base:propSetVelocity(vec())
+        } else {
+            WalkTransition = 1.0
+        }
+    }
+
+    if(changed(Alt)&Alt){ ThirdPerson=!ThirdPerson }
+    
+    if(changed(ZMState)|changed(ThirdPerson)){
+        CamFOV=FOV[clamp(ZMState+1,1,FOV:count()),number]
+        if(ZMState<0){ CamDist=(100*ThirdPerson)+((TP_CamDist/5)*(abs(ZMState))) }
+        else{ CamDist=(100*ThirdPerson) }
+    }
+    
+    if(changed(ThirdPerson)){
+        if(ThirdPerson){ CamPos=TP_CamPos }else{ CamPos=FP_CamPos }
+    }
+    
+    local Ground_Ranger = rangerOffsetHull(RangerDist, BasePos, -ZAxis, RangerHull)
+    local Distance = Ground_Ranger:distance()+Offset:z()
+    
+    local EffectiveSpace = Space & !WalkMode
+    On_Ground = Ground_Ranger:hit()*(!EffectiveSpace|BoostPowerVal==0)
+    
+    if(changed(On_Ground)){ Base:propGravity(!On_Ground) }
+    
+    FX = (W | A | S | D) & On_Ground & (Vel:z() > -15) & !WalkMode
+    
+    local MoveF = Pelvis:forward()
+    local MoveR = Pelvis:right()
+    local MoveU = Pelvis:up()
+    local Movement_Direction = ((MoveF*(W-S)) + (MoveR*(D-A)) + (MoveU*(BoostPowerVal>0)*(EffectiveSpace-Duck*!On_Ground))):normalized()
+    
+    local HasMoveInput = (W | A | S | D)
+    
+    if (WalkMode) {
+        CurrentMoveSpeed = WalkSpeed
+    } else {
+        if(Active & HasMoveInput) {
+            if(CurrentMoveSpeed < Move_Speed_Min) { CurrentMoveSpeed = Move_Speed_Min }
+            CurrentMoveSpeed = clamp(CurrentMoveSpeed + Move_Accel*0.05, Move_Speed_Min, Move_Speed)
+        } else {
+            CurrentMoveSpeed = clamp(CurrentMoveSpeed - Move_Decel*0.05, 0, Move_Speed)
+        }
+    }
+
+    local PrevXLean = clamp(XAng*0.2,-45,35)
+    local PrevZLean = clamp(ZAng*0.16 + (-VelL:y()*0.0032*((A|D))),-15,15)
+    local BodyVisualAng = ang(CamPitch/(1+On_Ground) + PrevXLean, BaseYaw, BaseRoll*0.25 + PrevZLean)
+    holoAng(1,BodyVisualAng)
+    
+    if(On_Ground){ BoostPowerVal += 0.05*!EffectiveSpace }
+    else{
+        BoostPowerVal += 0.005*!EffectiveSpace
+        BoostPowerVal -= 0.005*EffectiveSpace
+    }
+    BoostPowerVal = clamp(BoostPowerVal,0,1)
+    
+    local Stand_Force = vec(0,0,(StandHeight-Distance)*5)*On_Ground
+    
+    local DampXY = Move_Damping
+    if (WalkMode) {
+        DampXY = 0.85
+    } elseif(!HasMoveInput) {
+        DampXY = Coast_Damping
+    }
+    local Damping_Force = -Vel*vec(DampXY,DampXY,0.1+0.8*On_Ground)
+    
+    local DriveSpeed = CurrentMoveSpeed
+    if((EffectiveSpace | Duck) & (BoostPowerVal > 0)) { DriveSpeed = Move_Speed }
+    
+    local Move_Force = Movement_Direction*DriveSpeed*CanBoost
+    
+    if(changed(Shift)&Shift&CanBoost&(BoostPowerVal>=0.33) & !WalkMode){
+        if(W|S|A|D){
+            BoostDir = vec(W-S,A-D,0):rotateAroundAxis(vec(0,1,0),BasePitch*!On_Ground):normalized()
+            CanBoost=0
+            timer("unboost",1)
+            Base:propSetVelocityInstant(vec()-Vel*0.5)
+            Base:propSetVelocity(vec()-Vel*0.5)
+            BoostPowerVal -= 0.33
+            Base:emitSound("npc/waste_scanner/grenade_fire.wav",100,100)
+        }
+    }
+    
+    local BoostVal = BoostDir:rotateAroundAxis(ZAxis,CamYaw)*1500
+    Base:applyForce(((Ground_Ranger:entity():vel()*GroundVelScale) + BoostVal + Stand_Force + Damping_Force + Move_Force)*Mass)
+    
+    local Ang_Damping_Force = -Base:angVel()*10
+    XAng = clamp(VelL:x()*0.01,-45,45)+BoostDir:x()*75
+    ZAng = -clamp(VelL:y()*0.01,-45,45)-BoostDir:y()*75
+    
+    local NewXLean = clamp(XAng*0.2,-45,35)
+    local NewZLean = clamp(ZAng*0.16 + (-VelL:y()*0.0032*((A|D))),-15,15)
+    local BodyForceAng = ang(CamPitch/(1+On_Ground) + NewXLean, CamYaw, BaseRoll*0.25 + NewZLean)
+    Base:applyAngForce((Base:toLocal(BodyForceAng)*45 + Ang_Damping_Force)*Mass)
+
+    #=== WALK CYCLE LOGIC ===
+    IsMoving = HasMoveInput & On_Ground & WalkMode
+    local StepDuration = 0.8
+
+    if(IsMoving){
+        #  
+        StepTime = (systime() - CycleTime) / StepDuration
+        if(StepTime >= 1){
+            StepTime -= 1
+            CycleTime = systime() - (StepTime * StepDuration)
+            Step = !Step 
+        }
+        
+        #    
+        if(systime() - SoundCycleTime >= SoundStepDuration){
+            SoundCycleTime = systime()
+            if(On_Ground){
+                local FootEnt = Step ? holoEntity(5) : holoEntity(10)
+                local SpeedPitch = clamp(Base:vel():length() * 0.15, 0, 25)
+                local FinalPitch = clamp(StepSoundPitch + SpeedPitch + random(-5, 5), 50, 150)
+                FootEnt:emitSound("npc/dog/dog_footstep2.wav", 80, FinalPitch, StepSoundVolume)
+                FootEnt:emitSound("npc/dog/dog_servo5.wav", 80, FinalPitch * 0.6, StepSoundVolume * 0.5)
+            }
+        }
+    } else {
+        StepTime = 0
+        CycleTime = systime()
+        SoundCycleTime = systime()
+    }
+
+    #=== LEGS ===
+    local LeanOffset = vec(-XAng,ZAng,0):rotateAroundAxis(ZAxis,BaseYaw)
+    local FootPitch = clamp(-CamPitch/(1+On_Ground) + NewXLean,-45,55)
+    local FootAng = Pelvis:toWorld(ang(FootPitch,0,0))
+    
+    local LTarget = Pelvis:toWorld(LHeight*(0.9+(0.05*(D-A)))) + LeanOffset
+    local RTarget = Pelvis:toWorld(RHeight*(0.9+(0.05*(A-D)))) + LeanOffset
+
+    if(WalkMode & On_Ground & !Edit){
+        local WalkDir = (Pelvis:forward()*(W-S)) + (Pelvis:right()*(D-A))
+        if(WalkDir:length() > 0){ WalkDir = WalkDir:normalized() } else { WalkDir = vec(0) }
+
+        local LPhase = StepTime
+        local RPhase = (StepTime + 0.5) % 1.0
+
+        local LHeightOffset = 0
+        if(LPhase > 0.5){
+            local SwingT = (LPhase - 0.5) * 2.0
+            LHeightOffset = sin(SwingT * 180) * StepHeight
+        }
+
+        local RHeightOffset = 0
+        if(RPhase > 0.5){
+            local SwingT = (RPhase - 0.5) * 2.0
+            RHeightOffset = sin(SwingT * 180) * StepHeight
+        }
+
+        local LFwd = cos(LPhase * 360) * StepLength
+        local RFwd = cos(RPhase * 360) * StepLength
+
+        local LBasePos = Pelvis:toWorld(LHeight)
+        local RBasePos = Pelvis:toWorld(RHeight)
+
+        LTarget = LBasePos + WalkDir * LFwd + vec(0, 0, LHeightOffset)
+        RTarget = RBasePos + WalkDir * RFwd + vec(0, 0, RHeightOffset)
+
+        local RangerL = rangerOffsetHull(Height * 2, Pelvis:toWorld(vec(Leg_Forward_Offset, Leg_Stand_Width, 0)), vec(0, 0, -1), vec(12))
+        local RangerR = rangerOffsetHull(Height * 2, Pelvis:toWorld(vec(Leg_Forward_Offset, -Leg_Stand_Width, 0)), vec(0, 0, -1), vec(12))
+        
+        local GroundZ_L = RangerL:hit() ? RangerL:pos():z() + FootGroundOffset : LBasePos:z()
+        local GroundZ_R = RangerR:hit() ? RangerR:pos():z() + FootGroundOffset : RBasePos:z()
+        
+        GroundZ_L = max(GroundZ_L, LBasePos:z() - StepHeight)
+        GroundZ_R = max(GroundZ_R, RBasePos:z() - StepHeight)
+
+        LTarget = LTarget:setZ(GroundZ_L + LHeightOffset)
+        RTarget = RTarget:setZ(GroundZ_R + RHeightOffset)
+    }
+
+    if(!Edit){
+        two_seg_ik(2,3,4,Pelvis,LTarget)
+        two_seg_ik(7,8,9,Pelvis,RTarget)
+    }else{
+        LTarget = Pelvis:toWorld(LHeight)
+        RTarget = Pelvis:toWorld(RHeight)
+        two_seg_ik(2,3,4,Pelvis,LTarget)
+        two_seg_ik(7,8,9,Pelvis,RTarget)
+    }
+
+    holoAng(5,FootAng)
+    holoAng(10,FootAng)
+
+    #=== WEAPON READY / FIRE ===
+    local HandMouse1 = Mouse1 & !ShoulderMode
+    local HandMouse2 = Mouse2 & !ShoulderMode
+    AimLeft += 0.4*(HandMouse1 - !HandMouse1)
+    AimLeft = clamp(AimLeft, Edit, 1)
+    AimRight += 0.4*(HandMouse2 - !HandMouse2)
+    AimRight = clamp(AimRight, Edit, 1)
+    local HandLeftReady = !ShoulderMode & (AimLeft >= 1)
+    local HandRightReady = !ShoulderMode & (AimRight >= 1)
+    local ShoulderReady = ShoulderMode & ShoulderAnyReady & !ShoulderDeploy
+    FireLeft = Mouse1 & HandLeftReady & !Edit
+    FireRight = Mouse2 & HandRightReady & !Edit
+    FireShoulderLeft = Mouse1 & ShoulderReady & !Edit
+    FireShoulderRight = Mouse2 & ShoulderReady & !Edit
+    FireShoulder = FireShoulderLeft | FireShoulderRight
+    FireShoulder1 = ShoulderHoloReady1 * ((ShoulderSide1 == 1) ? FireShoulderLeft : FireShoulderRight)
+    FireShoulder2 = ShoulderHoloReady2 * ((ShoulderSide2 == 1) ? FireShoulderLeft : FireShoulderRight)
+    FireShoulder3 = ShoulderHoloReady3 * ((ShoulderSide3 == 1) ? FireShoulderLeft : FireShoulderRight)
+    FireShoulder4 = ShoulderHoloReady4 * ((ShoulderSide4 == 1) ? FireShoulderLeft : FireShoulderRight)
+
+    if(!ShoulderMode){
+        if(AimLeft>0 | AimRight>0){
+            GunsStowed=0
+            local AimPos = Active ? CamAimPos : Base:toWorld(vec(9999,0,0))
+            local GunRStow = Base:toWorld(ang(35,-25,-25))
+            local GunLStow = Base:toWorld(ang(35,25,25))
+            if(AimRight > 0){
+                local AngRight = (AimPos - Gun_Right:pos()):toAngle()
+                if(AimRight >= 1){ holoAng(11,AngRight) }
+                else{ holoAng(11,slerp(quat(GunRStow),quat(AngRight),clamp(AimRight*1.1,0,1)):toAngle()) }
+            }else{ holoAng(11,GunRStow) }
+            if(AimLeft > 0){
+                local AngLeft = (AimPos - Gun_Left:pos()):toAngle()
+                if(AimLeft >= 1){ holoAng(12,AngLeft) }
+                else{ holoAng(12,slerp(quat(GunLStow),quat(AngLeft),clamp(AimLeft*1.1,0,1)):toAngle()) }
+            }else{ holoAng(12,GunLStow) }
+        }
+        elseif(!GunsStowed){
+            holoAng(11,Base:toWorld(ang(35,-25,-25)))
+            holoAng(12,Base:toWorld(ang(35,25,25)))
+            GunsStowed=1
+        }
+    }else{ GunsStowed=1 }
+
+    if(!ShoulderMode & ShoulderStowUntil > 0 & Curtime >= ShoulderStowUntil){
+        stowShoulders()
+        ShoulderStowUntil=0
+    }
+
+    if(Base & ((Active & ShoulderMode) | (ShoulderStowUntil > Curtime))){
+        local ShoulderTarget = shoulderStowAng()
+        local Smooth = 0
+        local SmoothSpeed = Shoulder_Aim_Speed
+        if(Active & ShoulderMode) {
+            if(ShoulderDeploy) {
+                ShoulderTarget = ang(0, CamYaw + Shoulder_Aim_Yaw_Offset, Shoulder_Aim_Roll_Offset)
+                Smooth = 1
+                SmoothSpeed = Shoulder_Stow_Speed
+            } else {
+                local AimPitch = clamp(CamPitch + Shoulder_Aim_Pitch_Offset, -80, 80)
+                local AimYaw = CamYaw + Shoulder_Aim_Yaw_Offset
+                local AimRoll = Shoulder_Aim_Roll_Offset
+                ShoulderTarget = ang(AimPitch, AimYaw, AimRoll)
+                if(Shoulder_Aim_Speed < 100) { Smooth = 1 SmoothSpeed = Shoulder_Aim_Speed }
+            }
+        } else {
+            Smooth = 1
+            SmoothSpeed = Shoulder_Stow_Speed
+        }
+        if(Smooth) {
+            local T = clamp(SmoothSpeed / 100, 0.01, 1)
+            if(ShoulderHoloReady1){ holoAng(13,slerp(quat(holoEntity(13):angles()),quat(ShoulderTarget),T):toAngle()) }
+            if(ShoulderHoloReady2){ holoAng(14,slerp(quat(holoEntity(14):angles()),quat(ShoulderTarget),T):toAngle()) }
+            if(ShoulderHoloReady3){ holoAng(15,slerp(quat(holoEntity(15):angles()),quat(ShoulderTarget),T):toAngle()) }
+            if(ShoulderHoloReady4){ holoAng(16,slerp(quat(holoEntity(16):angles()),quat(ShoulderTarget),T):toAngle()) }
+        } else {
+            if(ShoulderHoloReady1) { holoAng(13,ShoulderTarget) }
+            if(ShoulderHoloReady2) { holoAng(14,ShoulderTarget) }
+            if(ShoulderHoloReady3) { holoAng(15,ShoulderTarget) }
+            if(ShoulderHoloReady4) { holoAng(16,ShoulderTarget) }
+        }
+    }
+
+    if(!ThirdPerson){
+        if(ZMState<0){ ZMState=0 }
+    }
+    Booster=!CanBoost|Edit|EffectiveSpace
+}
+
+if(clk("unboost")){
+    BoostDir=vec(0,0,0)
+    CanBoost=1
+}
+
+if(changed(~ZMIn)&ZMIn){
+    if(ZMState<FOV:count()-1){ ZMState++ }
+}
+
+if(changed(Active)&Active){
+    if(Base:isFrozen()){ Base:propFreeze(0) }
+}
+
+if(changed(~ZMOut)&ZMOut){
+    if(ThirdPerson){
+        if(ZMState>-5){ ZMState-- }
+    }else{
+        if(ZMState>0){ ZMState-- }
+    }
+}
+
+if(!ShoulderHoloReady1 & Shoulder_Base_1 & Base){ ShoulderHoloReady1 = setupShoulder(13,Shoulder_Base_1) }
+if(!ShoulderHoloReady2 & Shoulder_Base_2 & Base){ ShoulderHoloReady2 = setupShoulder(14,Shoulder_Base_2) }
+if(!ShoulderHoloReady3 & Shoulder_Base_3 & Base){ ShoulderHoloReady3 = setupShoulder(15,Shoulder_Base_3) }
+if(!ShoulderHoloReady4 & Shoulder_Base_4 & Base){ ShoulderHoloReady4 = setupShoulder(16,Shoulder_Base_4) }
